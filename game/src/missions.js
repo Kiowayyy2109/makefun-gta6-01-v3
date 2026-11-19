@@ -1,145 +1,97 @@
-// Port Aurelia — the story mission chain: stage tracking, timers,
-// checkpoints, rewards and failure/retry, driven by the MISSIONS table.
+// missions.js — the Port Aurelia story chain: seven missions for Mara Venn,
+// a courier who keeps taking one job too many. Each mission is a list of
+// phases; the world module walks the phases, shows the objective text, and
+// pays the reward when the last phase completes.
+//
+// Phase kinds:
+//   goto     reach the marker (any way you like)
+//   race     reach each checkpoint in order before the clock runs out
+//   collect  visit every point, in any order
+//   escape   reach the hideout, then shake the wanted level down to zero
+// A phase may carry a time limit in seconds and a setWanted level applied
+// when the phase begins.
 
-import { MISSIONS } from './config.js';
-import { dist } from './world.js';
+import { PLACES } from './city.js';
 
-export function createMissionState() {
-  return {
-    index: 0,          // which mission is active (== MISSIONS.length: story done)
-    stage: 0,
-    pointIndex: 0,     // checkpoint / crate index inside a race/collect stage
-    timer: -1,         // seconds left on a timed stage (-1: untimed)
-    active: false,     // a stage is live (false between missions, briefly)
-    completeTimer: 0,
-    failed: false,
-  };
-}
+export const MISSIONS = [
+  {
+    title: 'First Wheels',
+    brief: 'Rico left a car by the south avenue. Take it down to the pier and meet him at the end of the boardwalk.',
+    reward: 300,
+    phases: [
+      { kind: 'goto', x: 68, z: 128, text: 'Get to the marked car on the south avenue' },
+      { kind: 'goto', x: PLACES.pierEnd.x, z: PLACES.pierEnd.z - 12, text: 'Drive to Rico at the end of the pier' },
+    ],
+  },
+  {
+    title: 'Hot Package',
+    brief: 'A parcel in the west district needs to cross town fast. No questions, no stops.',
+    reward: 450,
+    phases: [
+      { kind: 'goto', x: -128, z: 68, text: 'Pick up the package in the west district' },
+      { kind: 'goto', x: 188, z: -52, text: 'Deliver the package across town', timer: 130 },
+    ],
+  },
+  {
+    title: 'Aurelia Sprint',
+    brief: 'The street racers want proof you can drive. Hit every checkpoint before the clock dies.',
+    reward: 600,
+    phases: [
+      {
+        kind: 'race', timer: 165, text: 'Hit every checkpoint before time runs out',
+        points: [
+          { x: 60, z: -60 }, { x: 180, z: -120 }, { x: 120, z: -240 },
+          { x: -60, z: -180 }, { x: -180, z: -60 }, { x: -120, z: 120 },
+        ],
+      },
+    ],
+  },
+  {
+    title: 'Crates of the Coast',
+    brief: 'Four crates fell off a truck around the marina and the boardwalk. Bring them all in.',
+    reward: 550,
+    phases: [
+      {
+        kind: 'collect', text: 'Collect the scattered crates',
+        points: [
+          { x: 96, z: 200 }, { x: -120, z: 200 }, { x: 44, z: 250 }, { x: -196, z: 188 },
+        ],
+      },
+    ],
+  },
+  {
+    title: 'Heat Wave',
+    brief: 'The drop went loud and the whole force is awake. Get to the hideout and lie low until it blows over.',
+    reward: 800,
+    phases: [
+      { kind: 'goto', x: 128, z: -128, text: 'Reach the drop point', setWanted: 3 },
+      { kind: 'escape', x: PLACES.hideout.x, z: PLACES.hideout.z, text: 'Reach the hideout, then lose the police' },
+    ],
+  },
+  {
+    title: 'Showroom Shine',
+    brief: 'A collector wants the display coupe from the car lot, delivered spotless to the north gate.',
+    reward: 900,
+    phases: [
+      { kind: 'goto', x: PLACES.carLot.x, z: PLACES.carLot.z, text: 'Take the coupe from the car lot' },
+      { kind: 'goto', x: -52, z: -248, text: 'Deliver the coupe to the north gate', timer: 120, setWanted: 2 },
+    ],
+  },
+  {
+    title: 'The Aurelia Job',
+    brief: 'Three briefcases, one lighthouse, no second chances. This is the score that gets Mara out.',
+    reward: 2000,
+    phases: [
+      {
+        kind: 'collect', text: 'Grab the three briefcases',
+        points: [
+          { x: -150, z: 36 }, { x: 30, z: -58 }, { x: 172, z: 118 },
+        ],
+      },
+      { kind: 'goto', x: PLACES.lighthouse.x - 10, z: PLACES.lighthouse.z - 14, text: 'Make the lighthouse rendezvous', timer: 170, setWanted: 2 },
+    ],
+  },
+];
 
-export function currentMission(ms) {
-  return ms.index < MISSIONS.length ? MISSIONS[ms.index] : null;
-}
-
-export function stageOf(ms) {
-  const m = currentMission(ms);
-  return m ? m.stages[ms.stage] : null;
-}
-
-// Where the HUD marker should point right now, or null.
-export function markerOf(ms) {
-  const st = stageOf(ms);
-  if (!st) return null;
-  if ((st.type === 'race' || st.type === 'collect') && st.points) {
-    const p = st.points[ms.pointIndex];
-    return p ? { x: p[0], z: p[1] } : null;
-  }
-  return { x: st.x, z: st.z };
-}
-
-export function startStage(ms, state, hooks) {
-  const st = stageOf(ms);
-  if (!st) return;
-  ms.pointIndex = 0;
-  ms.timer = st.time || -1;
-  ms.active = true;
-  if (st.armWanted) {
-    state.wanted = Math.max(state.wanted, st.armWanted);
-    hooks.toast(`Wanted level ${st.armWanted} — the Aurelia PD is rolling!`);
-  }
-  if (st.carSpot) hooks.spawnMissionCar();
-}
-
-export function startMission(ms, state, hooks) {
-  const m = currentMission(ms);
-  if (!m) return;
-  ms.stage = 0;
-  hooks.banner(m.title, `${m.giver} — $${m.reward}`);
-  hooks.toast(m.intro);
-  startStage(ms, state, hooks);
-}
-
-function finishMission(ms, state, hooks) {
-  const m = currentMission(ms);
-  state.cash += m.reward;
-  hooks.audio.cash(); hooks.audio.jingle();
-  hooks.banner('MISSION COMPLETE', `${m.title} — +$${m.reward}`);
-  ms.index += 1; ms.stage = 0; ms.active = false;
-  if (ms.index >= MISSIONS.length) hooks.banner('STORY COMPLETE', 'Mara Voss owns a piece of Port Aurelia now. Free roam!');
-  else startMission(ms, state, hooks);
-  hooks.save();
-}
-
-function failStage(ms, state, hooks, why) {
-  hooks.audio.fail();
-  hooks.banner('MISSION FAILED', why);
-  const st = stageOf(ms);
-  ms.timer = st && st.time ? st.time : -1;
-  ms.pointIndex = 0;
-  if (st && st.type === 'escape') state.wanted = Math.max(state.wanted, 2);
-}
-
-// Advance the active stage. Called every frame with the world state.
-export function updateMissions(ms, state, dt, hooks) {
-  const st = stageOf(ms);
-  if (!st || !ms.active) return;
-  if (ms.timer > 0) {
-    ms.timer -= dt;
-    if (ms.timer <= 0) { failStage(ms, state, hooks, 'Out of time — the stage restarts.'); return; }
-  }
-  const p = state.player;
-  const at = (x, z, r) => dist(p.x, p.z, x, z) <= r;
-  switch (st.type) {
-    case 'goto':
-      if (at(st.x, st.z, 6)) nextStage(ms, state, hooks);
-      break;
-    case 'drive':
-      if (st.carSpot) {
-        if (p.car && p.car.missionCar) nextStage(ms, state, hooks);
-      } else if (p.car && at(st.x, st.z, 8)) nextStage(ms, state, hooks);
-      break;
-    case 'race': {
-      const pt = st.points[ms.pointIndex];
-      if (pt && at(pt[0], pt[1], 9)) {
-        hooks.audio.checkpoint();
-        ms.pointIndex += 1;
-        hooks.toast(`Checkpoint ${ms.pointIndex} / ${st.points.length}`);
-        if (ms.pointIndex >= st.points.length) nextStage(ms, state, hooks);
-      }
-      break;
-    }
-    case 'collect': {
-      const pt = st.points[ms.pointIndex];
-      if (pt && at(pt[0], pt[1], 4.5)) {
-        hooks.audio.pickup();
-        ms.pointIndex += 1;
-        hooks.toast(`Crate ${ms.pointIndex} / ${st.count}`);
-        if (ms.pointIndex >= st.count) nextStage(ms, state, hooks);
-      }
-      break;
-    }
-    case 'escape':
-      // Must arrive clean: heat still on means keep running.
-      if (at(st.x, st.z, 7) && state.wanted === 0) nextStage(ms, state, hooks);
-      break;
-  }
-}
-
-function nextStage(ms, state, hooks) {
-  const m = currentMission(ms);
-  ms.stage += 1;
-  if (ms.stage >= m.stages.length) finishMission(ms, state, hooks);
-  else { hooks.audio.checkpoint(); startStage(ms, state, hooks); }
-}
-
-export function objectiveText(ms, state) {
-  const m = currentMission(ms);
-  if (!m) return { title: 'Port Aurelia — free roam', text: 'Story complete. Cruise, collect packages, outrun the PD.', timer: '' };
-  const st = stageOf(ms);
-  if (!st) return { title: m.title, text: m.intro, timer: '' };
-  let text = st.label;
-  if (st.type === 'race') text += ` — checkpoint ${Math.min(ms.pointIndex + 1, st.points.length)} of ${st.points.length}`;
-  if (st.type === 'collect') text += ` — ${ms.pointIndex} of ${st.count}`;
-  if (st.type === 'escape' && state.wanted > 0) text = `Lose the police first (${state.wanted}★), then reach the hideout`;
-  const timer = ms.timer > 0 ? `${Math.ceil(ms.timer)}s` : '';
-  return { title: `Mission ${ms.index + 1}/${MISSIONS.length} — ${m.title}`, text, timer };
-}
+/** Total cash the whole chain pays, for the completion screen. */
+export const TOTAL_REWARD = MISSIONS.reduce((sum, m) => sum + m.reward, 0);
