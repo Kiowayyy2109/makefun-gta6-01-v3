@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Port Aurelia — an open-world crime game</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a0f1e; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .hud { position: fixed; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.65); pointer-events: none; z-index: 5; }
+  #hud-top { top: 14px; left: 16px; }
+  #cash { font-size: 30px; font-weight: 800; color: #7dff9a; letter-spacing: .5px; }
+  #packages { font-size: 15px; font-weight: 700; color: #ffd76a; margin-top: 2px; }
+  #hud-right { top: 14px; right: 16px; text-align: right; }
+  #stars { font-size: 26px; letter-spacing: 3px; color: #ffd76a; min-height: 30px; }
+  #stars .off { color: rgba(255,255,255,.28); }
+  #healthwrap { width: 190px; height: 14px; background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.7); border-radius: 7px; margin-left: auto; overflow: hidden; }
+  #healthbar { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5a5a, #ffb35a); }
+  #ammo { font-size: 16px; font-weight: 700; margin-top: 4px; }
+  #objective { left: 50%; transform: translateX(-50%); top: 16px; width: min(620px, 72vw); text-align: center; }
+  #objective .mtitle { font-size: 15px; font-weight: 800; letter-spacing: 2px; color: #ffd76a; text-transform: uppercase; }
+  #objective .mtext { font-size: 19px; font-weight: 700; margin-top: 2px; }
+  #objective .mtimer { font-size: 17px; font-weight: 800; color: #ff9a9a; }
+  #minimap { position: fixed; right: 16px; bottom: 16px; width: 176px; height: 176px; border-radius: 50%; border: 3px solid rgba(255,255,255,.75); box-shadow: 0 6px 24px rgba(0,0,0,.5); z-index: 5; background: #20303c; }
+  #prompt { left: 50%; transform: translateX(-50%); bottom: 118px; font-size: 19px; font-weight: 700; background: rgba(0,0,0,.5); padding: 7px 16px; border-radius: 20px; }
+  #toast { left: 50%; transform: translateX(-50%); bottom: 170px; font-size: 22px; font-weight: 800; color: #ffd76a; transition: opacity .3s; }
+  #banner { inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(10,4,16,.45); z-index: 8; }
+  #banner .big { font-size: 64px; font-weight: 900; letter-spacing: 4px; }
+  #banner .sub { font-size: 22px; font-weight: 700; margin-top: 8px; }
+  .overlay { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fff; background: linear-gradient(180deg, rgba(30,8,40,.42), rgba(10,4,20,.78)); }
+  .overlay h1 { font-size: 84px; margin: 0; font-weight: 900; letter-spacing: 3px; background: linear-gradient(180deg, #ffe9a8, #ff7e5f 70%, #e84e7a); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 4px 14px rgba(0,0,0,.55)); }
+  .overlay h2 { font-size: 24px; margin: 6px 0 0; font-weight: 700; color: #ffd76a; letter-spacing: 5px; text-transform: uppercase; }
+  .overlay p { font-size: 17px; line-height: 1.55; max-width: 640px; color: #f3e9ff; }
+  .overlay .keys { font-size: 15px; color: #cfc4e8; line-height: 1.7; }
+  .overlay .go { font-size: 22px; font-weight: 800; color: #7dff9a; margin-top: 14px; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Port Aurelia: explore the coastal city of Port Aurelia on foot and by car"></canvas>
+<canvas id="minimap" width="176" height="176" aria-hidden="true"></canvas>
+<div id="hud-top" class="hud"><div id="cash">$0</div><div id="packages">Packages 0 / 20</div></div>
+<div id="hud-right" class="hud"><div id="stars"></div><div id="healthwrap"><div id="healthbar"></div></div><div id="ammo">Pistol 0</div></div>
+<div id="objective" class="hud"><div class="mtitle"></div><div class="mtext"></div><div class="mtimer"></div></div>
+<div id="prompt" class="hud hidden"></div>
+<div id="toast" class="hud" style="opacity:0"></div>
+<div id="banner" class="hud hidden"><div class="big"></div><div class="sub"></div></div>
+<div id="title" class="overlay">
+  <h1>PORT AURELIA</h1>
+  <h2>Neon tides, dirty money</h2>
+  <p>Mara Voss washes ashore in Port Aurelia with forty dollars and a borrowed name. Run errands for the Solano crew, lift cars, dodge the Aurelia PD and build a fortune along the golden shore — one job at a time.</p>
+  <p class="keys">WASD / Arrows — move &amp; drive &nbsp;•&nbsp; Shift — sprint &nbsp;•&nbsp; E — enter / exit car, talk &nbsp;•&nbsp; F — melee<br>Mouse click or J — fire pistol &nbsp;•&nbsp; Space — handbrake &nbsp;•&nbsp; P — pause &nbsp;•&nbsp; Enter — start</p>
+  <div class="go">Press Enter or click to play</div>
+</div>
+<div id="pause" class="overlay hidden">
+  <h1 style="font-size:52px">PAUSED</h1>
+  <p class="keys">P or Esc — resume<br>Progress is saved automatically in this browser.</p>
+</div>
+<p id="status" role="status" aria-live="polite"></p>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
